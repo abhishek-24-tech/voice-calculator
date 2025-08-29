@@ -1,0 +1,4 @@
+
+SpeechRecognition>=3.10.0
+PyAudio
+word2number>=1.1
