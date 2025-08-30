@@ -10,6 +10,14 @@ venv/
 ENV/
 env/
 *.env
+/build/
+/dist/
+*.spec
+*.exe
+*.toc
+*.pkg
+*.zip
+
 
 # IDE
 .vscode/

@@ -1,15 +1,46 @@
-
-import threading
 import tkinter as tk
 from tkinter import messagebox
 import ast
-import operator as op
-
+import threading
 import speech_recognition as sr
 from word2number import w2n
+from datetime import datetime, timedelta
 
-# ---------- Safe Evaluator (AST-based) ----------
-# Allowed operators
+# -------------------------------
+# Date Calculator Function
+# -------------------------------
+def date_calculator():
+    # Create a new window for date input
+    date_window = tk.Toplevel(root)
+    date_window.title("Date Calculator")
+    date_window.geometry("300x200")
+
+    tk.Label(date_window, text="Enter first date (YYYY-MM-DD):").pack(pady=5)
+    entry1 = tk.Entry(date_window)
+    entry1.pack(pady=5)
+
+    tk.Label(date_window, text="Enter second date (YYYY-MM-DD):").pack(pady=5)
+    entry2 = tk.Entry(date_window)
+    entry2.pack(pady=5)
+
+    def calculate_difference():
+        try:
+            d1 = datetime.strptime(entry1.get(), "%Y-%m-%d")
+            d2 = datetime.strptime(entry2.get(), "%Y-%m-%d")
+            diff_days = abs((d2 - d1).days)
+            diff_years = diff_days / 365
+
+            messagebox.showinfo(
+                "Date Difference",
+                f"Difference: {diff_days} days (~{diff_years:.2f} years)"
+            )
+        except ValueError:
+            messagebox.showerror("Error", "Please enter dates in YYYY-MM-DD format")
+
+    tk.Button(date_window, text="Calculate", command=calculate_difference).pack(pady=10)
+
+# ---------------- Safe evaluator ----------------
+import operator as op
 _ALLOWED_BIN_OPS = {
     ast.Add: op.add,
     ast.Sub: op.sub,
@@ -18,231 +49,220 @@ _ALLOWED_BIN_OPS = {
     ast.Pow: op.pow,
     ast.Mod: op.mod,
 }
-_ALLOWED_UNARY_OPS = {
-    ast.UAdd: op.pos,
-    ast.USub: op.neg,
-}
+_ALLOWED_UNARY_OPS = {ast.UAdd: op.pos, ast.USub: op.neg}
 
 def _eval_ast(node):
     if isinstance(node, ast.Expression):
         return _eval_ast(node.body)
-    if isinstance(node, ast.Num):  # Python <=3.7
-        return node.n
-    if isinstance(node, ast.Constant):  # Python 3.8+
+    if isinstance(node, ast.Constant):  # numbers
         if isinstance(node.value, (int, float)):
             return node.value
-        raise ValueError("Only numbers are allowed.")
+        raise ValueError("Only numbers allowed")
     if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_BIN_OPS:
         left = _eval_ast(node.left)
         right = _eval_ast(node.right)
         return _ALLOWED_BIN_OPS[type(node.op)](left, right)
     if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_UNARY_OPS:
-        operand = _eval_ast(node.operand)
-        return _ALLOWED_UNARY_OPS[type(node.op)](operand)
-    if isinstance(node, ast.Paren):
-        return _eval_ast(node.value)
-    if isinstance(node, ast.Expr):
-        return _eval_ast(node.value)
-    if isinstance(node, ast.Call):
-        raise ValueError("Function calls are not allowed.")
-    if isinstance(node, ast.Name):
-        raise ValueError("Names/variables are not allowed.")
-    if isinstance(node, ast.Subscript):
-        raise ValueError("Subscripts are not allowed.")
-    raise ValueError("Invalid or unsupported expression.")
+        return _ALLOWED_UNARY_OPS[type(node.op)](_eval_ast(node.operand))
+    raise ValueError("Invalid or unsupported expression")
 
-def safe_eval(expr: str) -> float:
-    """Safely evaluate arithmetic expression with + - * / ** % and parentheses."""
-    try:
-        tree = ast.parse(expr, mode='eval')
-        return _eval_ast(tree)
-    except ZeroDivisionError:
-        raise
-    except Exception as e:
-        raise ValueError(str(e))
+def safe_eval(expr: str):
+    tree = ast.parse(expr, mode='eval')
+    return _eval_ast(tree)
 
-# ---------- Speech to Math Conversion ----------
+# ---------------- Speech to math (simple) ----------------
 import re
-
-# Order matters: replace longer phrases first
 PHRASE_REPLACEMENTS = [
     (r"\bto the power of\b", "**"),
     (r"\bpower of\b", "**"),
     (r"\bpower\b", "**"),
     (r"\bdivided by\b", "/"),
     (r"\bdivide by\b", "/"),
-    (r"\bdivide\b", "/"),
-    (r"\bover\b", "/"),
     (r"\bmultiplied by\b", "*"),
     (r"\btimes\b", "*"),
-    (r"\binto\b", "*"),
     (r"\bminus\b", "-"),
     (r"\bplus\b", "+"),
-    (r"\badd\b", "+"),
-    (r"\bsubtract\b", "-"),
-    (r"\bopen parenthesis\b", "("),
-    (r"\bclose parenthesis\b", ")"),
+    (r"\bover\b", "/"),
     (r"\bpoint\b", "."),
-    (r"\bx\b", "*"),  # often recognized as 'x' for multiply
+    (r"\bx\b", "*"),
 ]
 
-NUMBER_WORDS = set("""
-zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen
-seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million
-and a an point
-""".split())
+NUMBER_WORDS = set("""zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen
+sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million and""".split())
 
 def words_chunk_to_number(tokens):
-    """Convert a sequence of number words to a numeric string using word2number."""
     phrase = " ".join(tokens)
-    # Normalize common artifacts
     phrase = phrase.replace(" a ", " one ")
     try:
         n = w2n.word_to_num(phrase)
         return str(n)
     except Exception:
-        return " ".join(tokens)  # fallback
+        return " ".join(tokens)
 
 def text_to_math(text: str) -> str:
     s = text.lower().strip()
     s = re.sub(r",", "", s)
-    # Replace phrases
     for pat, repl in PHRASE_REPLACEMENTS:
         s = re.sub(pat, repl, s)
-
-    # Tokenize by space and keep operators/parentheses/dots separate
-    # Split operators to own tokens
-    s = re.sub(r"([\+\-\*\/\(\)\%])", r" \1 ", s)
+    s = re.sub(r"([\+\-\*\/\(\)\%])", r" \1 ", s)  # separate operators
     tokens = s.split()
-
     result_tokens = []
     number_buffer = []
-
-    def flush_number_buffer():
+    def flush():
         if number_buffer:
-            # If buffer contains any number-words, convert them
             if any(t in NUMBER_WORDS for t in number_buffer):
                 result_tokens.append(words_chunk_to_number(number_buffer))
             else:
-                # Join digits or mixed tokens
                 result_tokens.append("".join(number_buffer))
             number_buffer.clear()
-
     for t in tokens:
         if t in {"+", "-", "*", "/", "(", ")", "%", "**"}:
-            flush_number_buffer()
+            flush()
             result_tokens.append(t)
         else:
-            # Accumulate potential number words/digits/decimal points
             number_buffer.append(t)
-
-    flush_number_buffer()
-    # Post-clean: join repeated ** that might have been split
+    flush()
     expr = " ".join(result_tokens)
     expr = expr.replace("* *", "**")
-    # Remove accidental spaces around dots in numbers
     expr = re.sub(r"\s*\.\s*", ".", expr)
     return expr
 
-# ---------- GUI ----------
-class VoiceCalculatorApp:
-    def __init__(self, root):
-        self.root = root
-        root.title("Voice Calculator")
-        root.geometry("360x500")
+# ---------------- GUI & Calculator ----------------
+root = tk.Tk()
+root.title("Echo Calculator")
+root.geometry("360x500")
 
-        self.entry = tk.Entry(root, font=("Segoe UI", 20), bd=6, relief=tk.GROOVE, justify="right")
-        self.entry.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
+entry = tk.Entry(root, font=("Segoe UI", 20), bd=6, relief=tk.GROOVE, justify="right")
+entry.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
 
-        # Configure grid
-        for i in range(6):
-            root.rowconfigure(i, weight=1)
-        for j in range(4):
-            root.columnconfigure(j, weight=1)
+for i in range(7):
+    root.rowconfigure(i, weight=1)
+for j in range(4):
+    root.columnconfigure(j, weight=1)
 
-        # Buttons layout
-        buttons = [
-            ("C", 1, 0), ("(", 1, 1), (")", 1, 2), ("⌫", 1, 3),
-            ("7", 2, 0), ("8", 2, 1), ("9", 2, 2), ("/", 2, 3),
-            ("4", 3, 0), ("5", 3, 1), ("6", 3, 2), ("*", 3, 3),
-            ("1", 4, 0), ("2", 4, 1), ("3", 4, 2), ("-", 4, 3),
-            ("0", 5, 0), (".", 5, 1), ("=", 5, 2), ("+", 5, 3),
-        ]
+def evaluate():
+    expr = entry.get().strip()
+    if not expr:
+        return
+    try:
+        res = safe_eval(expr)
+        entry.delete(0, tk.END)
+        entry.insert(tk.END, str(res))
+    except ZeroDivisionError:
+        messagebox.showerror("Math Error", "Division by zero.")
+    except Exception as e:
+        messagebox.showerror("Invalid Expression", str(e))
 
-        for (text, r, c) in buttons:
-            tk.Button(root, text=text, font=("Segoe UI", 16), command=lambda t=text: self.on_button(t)).grid(
-                row=r, column=c, padx=6, pady=6, sticky="nsew"
-            )
+def on_button(ch):
+    if ch == "C":
+        entry.delete(0, tk.END)
+    elif ch == "⌫":
+        cur = entry.get()
+        entry.delete(0, tk.END)
+        entry.insert(tk.END, cur[:-1])
+    elif ch == "=":
+        evaluate()
+    else:
+        entry.insert(tk.END, ch)
 
-        # Voice button spans all columns
-        self.voice_btn = tk.Button(root, text="🎤 Speak", font=("Segoe UI", 16), command=self.on_voice_click)
-        self.voice_btn.grid(row=6, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
+# Buttons
+buttons = [
+    ("C",1,0), ("(",1,1), (")",1,2), ("⌫",1,3),
+    ("7",2,0), ("8",2,1), ("9",2,2), ("/",2,3),
+    ("4",3,0), ("5",3,1), ("6",3,2), ("*",3,3),
+    ("1",4,0), ("2",4,1), ("3",4,2), ("-",4,3),
+    ("0",5,0), (".",5,1), ("=",5,2), ("+",5,3),
+]
 
-    def on_button(self, char):
-        if char == "C":
-            self.entry.delete(0, tk.END)
-        elif char == "⌫":
-            current = self.entry.get()
-            if current:
-                self.entry.delete(len(current)-1, tk.END)
-        elif char == "=":
-            self.evaluate()
-        else:
-            self.entry.insert(tk.END, char)
+for (txt,r,c) in buttons:
+    tk.Button(root, text=txt, font=("Segoe UI", 16), command=lambda t=txt: on_button(t)).grid(row=r, column=c, padx=6, pady=6, sticky="nsew")
 
-    def evaluate(self):
-        expr = self.entry.get().strip()
-        if not expr:
-            return
+# Voice button and Date button on bottom row
+voice_btn = tk.Button(root, text="🎤 Speak", font=("Segoe UI", 16))
+voice_btn.grid(row=6, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+
+date_btn = tk.Button(root, text="📅 Date", font=("Segoe UI", 16), command=date_calculator)
+date_btn.grid(row=6, column=2, columnspan=2, padx=10, pady=10, sticky="nsew")
+
+# ---------------- Keyboard support ----------------
+def key_press(event):
+    ch = event.char
+    if ch.isdigit() or ch in "+-*/().":
+        entry.insert(tk.END, ch)
+    elif event.keysym == "Return":
+        evaluate()
+    elif event.keysym == "BackSpace":
+        cur = entry.get()
+        entry.delete(0, tk.END)
+        entry.insert(tk.END, cur[:-1])
+
+root.bind("<Key>", key_press)
+
+# ---------------- Voice handling (threaded) ----------------
+def _listen_and_process():
+    recognizer = sr.Recognizer()
+    try:
+        with sr.Microphone() as source:
+            recognizer.adjust_for_ambient_noise(source, duration=0.3)
+            audio = recognizer.listen(source, timeout=5, phrase_time_limit=7)
+        text = recognizer.recognize_google(audio)
+        expr = text_to_math(text)
+        root.after(0, lambda: entry.delete(0, tk.END))
+        root.after(0, lambda: entry.insert(tk.END, expr))
+        root.after(0, evaluate)
+    except sr.WaitTimeoutError:
+        root.after(0, lambda: messagebox.showwarning("Timeout", "No speech detected."))
+    except sr.UnknownValueError:
+        root.after(0, lambda: messagebox.showwarning("Try Again", "Could not understand audio."))
+    except sr.RequestError as e:
+        root.after(0, lambda: messagebox.showerror("Speech Service Error", str(e)))
+    except Exception as e:
+        root.after(0, lambda: messagebox.showerror("Error", str(e)))
+    finally:
+        root.after(0, lambda: voice_btn.config(state=tk.NORMAL, text="🎤 Speak"))
+
+def on_voice_click():
+    voice_btn.config(state=tk.DISABLED, text="Listening...")
+    threading.Thread(target=_listen_and_process, daemon=True).start()
+
+voice_btn.config(command=on_voice_click)
+
+# ---------------- Date Calculator popup ----------------
+def open_date_calculator():
+    win = tk.Toplevel(root)
+    win.title("Date Calculator")
+    win.geometry("360x220")
+    # difference
+    tk.Label(win, text="First date (YYYY-MM-DD)").pack(pady=(8,0))
+    d1 = tk.Entry(win); d1.pack(pady=4)
+    tk.Label(win, text="Second date (YYYY-MM-DD)").pack(pady=(6,0))
+    d2 = tk.Entry(win); d2.pack(pady=4)
+    def calc_diff():
         try:
-            result = safe_eval(expr)
-            self.entry.delete(0, tk.END)
-            self.entry.insert(tk.END, str(result))
-        except ZeroDivisionError:
-            messagebox.showerror("Math Error", "Division by zero.")
+            dt1 = datetime.strptime(d1.get().strip(), "%Y-%m-%d")
+            dt2 = datetime.strptime(d2.get().strip(), "%Y-%m-%d")
+            diff = abs((dt2 - dt1).days)
+            messagebox.showinfo("Difference", f"{diff} days")
         except Exception as e:
-            messagebox.showerror("Invalid Expression", str(e))
+            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+    tk.Button(win, text="Find Difference (days)", command=calc_diff).pack(pady=6)
 
-    def on_voice_click(self):
-        # Use a thread so the UI doesn't freeze while listening
-        self.voice_btn.config(state=tk.DISABLED, text="Listening... 🎤")
-        threading.Thread(target=self._listen_and_process, daemon=True).start()
-
-    def _listen_and_process(self):
-        recognizer = sr.Recognizer()
+    # add days
+    tk.Label(win, text="Base date (YYYY-MM-DD)").pack(pady=(10,0))
+    base = tk.Entry(win); base.pack(pady=4)
+    tk.Label(win, text="Days to add (integer)").pack(pady=(6,0))
+    days = tk.Entry(win); days.pack(pady=4)
+    def add_days():
         try:
-            with sr.Microphone() as source:
-                recognizer.adjust_for_ambient_noise(source, duration=0.3)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=7)
-            text = recognizer.recognize_google(audio)
-            expr = text_to_math(text)
-            # Update UI back on main thread
-            self.root.after(0, self._set_expression_and_eval, expr)
-        except sr.WaitTimeoutError:
-            self.root.after(0, lambda: messagebox.showwarning("Timeout", "No speech detected."))
-        except sr.UnknownValueError:
-            self.root.after(0, lambda: messagebox.showwarning("Try Again", "Could not understand audio."))
-        except sr.RequestError as e:
-            self.root.after(0, lambda: messagebox.showerror("Speech Service Error", str(e)))
-        except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
-        finally:
-            self.root.after(0, lambda: self.voice_btn.config(state=tk.NORMAL, text="🎤 Speak"))
-
-    def _set_expression_and_eval(self, expr):
-        self.entry.delete(0, tk.END)
-        self.entry.insert(tk.END, expr)
-        # Optional: auto-evaluate after voice input
-        try:
-            result = safe_eval(expr)
-            self.entry.delete(0, tk.END)
-            self.entry.insert(tk.END, str(result))
+            dt = datetime.strptime(base.get().strip(), "%Y-%m-%d")
+            n = int(days.get().strip())
+            future = dt + timedelta(days=n)
+            messagebox.showinfo("Future date", future.strftime("%Y-%m-%d"))
         except Exception:
-            # If invalid, just leave the expression as-is for user to edit
-            pass
+            messagebox.showerror("Error", "Invalid input. Date must be YYYY-MM-DD and days an integer.")
+    tk.Button(win, text="Add Days", command=add_days).pack(pady=8)
 
+date_btn.config(command=open_date_calculator)
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = VoiceCalculatorApp(root)
-    root.mainloop()
+# --------------- Start ---------------
+root.mainloop()
