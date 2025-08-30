@@ -6,6 +6,39 @@ import speech_recognition as sr
 from word2number import w2n
 from datetime import datetime, timedelta
 
+# -------------------------------
+# Date Calculator Function
+# -------------------------------
+def date_calculator():
+    # Create a new window for date input
+    date_window = tk.Toplevel(root)
+    date_window.title("Date Calculator")
+    date_window.geometry("300x200")
+
+    tk.Label(date_window, text="Enter first date (YYYY-MM-DD):").pack(pady=5)
+    entry1 = tk.Entry(date_window)
+    entry1.pack(pady=5)
+
+    tk.Label(date_window, text="Enter second date (YYYY-MM-DD):").pack(pady=5)
+    entry2 = tk.Entry(date_window)
+    entry2.pack(pady=5)
+
+    def calculate_difference():
+        try:
+            d1 = datetime.strptime(entry1.get(), "%Y-%m-%d")
+            d2 = datetime.strptime(entry2.get(), "%Y-%m-%d")
+            diff_days = abs((d2 - d1).days)
+            diff_years = diff_days / 365
+
+            messagebox.showinfo(
+                "Date Difference",
+                f"Difference: {diff_days} days (~{diff_years:.2f} years)"
+            )
+        except ValueError:
+            messagebox.showerror("Error", "Please enter dates in YYYY-MM-DD format")
+
+    tk.Button(date_window, text="Calculate", command=calculate_difference).pack(pady=10)
+
 # ---------------- Safe evaluator ----------------
 import operator as op
 _ALLOWED_BIN_OPS = {
@@ -148,7 +181,7 @@ for (txt,r,c) in buttons:
 voice_btn = tk.Button(root, text="🎤 Speak", font=("Segoe UI", 16))
 voice_btn.grid(row=6, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
-date_btn = tk.Button(root, text="📅 Date", font=("Segoe UI", 16))
+date_btn = tk.Button(root, text="📅 Date", font=("Segoe UI", 16), command=date_calculator)
 date_btn.grid(row=6, column=2, columnspan=2, padx=10, pady=10, sticky="nsew")
 
 # ---------------- Keyboard support ----------------
